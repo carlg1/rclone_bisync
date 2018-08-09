@@ -17,10 +17,11 @@ import RClone
 #################################################################################
 ## TODO
 #################################################################################
-# Better google drive handling
+# Better google doc handling
 # handle dup file names
 # use sync to copy files 1 dir
 # other meta data?
+# renamed files
 
 
 #################################################################################
@@ -41,11 +42,6 @@ rclone = None
 #################################################################################
 ## Enums
 #################################################################################
-class Action(Enum):
-    none = 0
-    copyto = 1
-    deletefrom = 2
-    conflict = 3
 
 
 #################################################################################
@@ -119,7 +115,7 @@ def get_previous_list():
 #################################################################################
 def calc_diffs(f):
     cf = {}
-    tests = ((0, 1), (0, 2), (1,2)) #0=Previous, 1=Local, 2=Remote; so compare Prev to Curr, Prev to Remot, ...
+    tests = ((0, 1), (0, 2)) #0=Previous, 1=Local, 2=Remote; so compare Prev to Curr, Prev to Remote
     lookups = ('previous', 'local', 'remote')
 
     for name in f:
@@ -140,19 +136,28 @@ def calc_diffs(f):
             if(T1 and T2):
                 if(f[name][L1]['md5sum'] != f[name][L2]['md5sum']):
                     f[name]['changed'] = 'md5sum'
-                    break
+                    if('which' not in f[name]):
+                        f[name]['which'] = RClone.Direction.neither
+                    f[name]['which'] |= test[1]
+                    continue
 
                 if(f[name][L1]['size'] != f[name][L2]['size']):
                     f[name]['changed'] = 'size'
-                    break
+                    if('which' not in f[name]):
+                        f[name]['which'] = RClone.Direction.neither
+                    f[name]['which'] |= test[1]
+                    continue
 
         if('changed' not in f[name]):
+            w = 0
             if(vals[0] and vals[1] and f[name]['previous']['time'] != f[name]['local']['time']):
                 f[name]['changed'] = 'time'
-                f[name]['which'] = 'time'
-            elif(vals[0] and vals[2] and f[name]['previous']['rtime'] != f[name]['remote']['time']):
+                w += 1 #copy to remote
+            if(vals[0] and vals[2] and f[name]['previous']['rtime'] != f[name]['remote']['time']):
                 f[name]['changed'] = 'time'
-                f[name]['which'] = 'rtime'
+                w += 2 #copy to local
+            if(w):
+                f[name]['which'] = w
 
         if('changed' in f[name] or 'missing' in f[name]):
             cf[name] = calc_actions(f[name])
@@ -162,25 +167,24 @@ def calc_diffs(f):
 def calc_actions(f):
     #fix deal w/ time vs rtime diffs
     cf = {}
+    m = {}
+    c = {}
 
-    if('changed' in f and 'missing' in f):
-        raise #fix me -- handle
-    elif('changed' in f):
-        chk = f['changed']
-
-        if(f['previous'][chk] == f['local'][chk] == f['remote'][chk]):
-            raise RuntimeError("A file is marked as changed incorrectly")
-        elif(f['remote'][chk] == f['previous'][chk]):
-            cf['action'] = Action.copyto
-            cf['direction'] = RClone.Direction.remote
-        elif(f['local'][chk] == f['previous'][chk]):
-            cf['action'] = Action.copyto
-            cf['direction'] = RClone.Direction.local
+    if('changed' in f):
+        w = f['which']
+        if(w == RClone.Direction.local):
+            c['action'] = RClone.Action.copyto
+            c['direction'] = RClone.Direction.remote
+        elif(w == RClone.Direction.remote):
+            c['action'] = RClone.Action.copyto
+            c['direction'] = RClone.Direction.local
+        elif(w == RClone.Direction.both):
+            c['action'] = RClone.Action.conflict
+            c['direction'] = RClone.Direction.neither
         else:
-            cf['action'] = Action.conflict
-            cf['direction'] = RClone.Direction.neither
+            raise RuntimeError("A file is marked as changed incorrectly -- time")
 
-    elif('missing' in f):
+    if('missing' in f):
         P = 'previous' in f
         L = 'local' in f
         R = 'remote' in f
@@ -192,30 +196,35 @@ def calc_actions(f):
             raise RuntimeError("A file is marked as missing incorrectly")
         elif(P == True and L == False and R == False):
             # Deleted manually? still nothing to do
-            cf['action'] = Action.none
-            cf['direction'] = RClone.Direction.neither
+            m['action'] = RClone.Action.none
+            m['direction'] = RClone.Direction.neither
         elif(P == False and L == True and R == True):
             # File manually added? still nothing to do
-            cf['action'] = Action.none
-            cf['direction'] = RClone.Direction.neither
+            m['action'] = RClone.Action.none
+            m['direction'] = RClone.Direction.neither
         elif(P == False and L == True and R == False):
             # New local file
-            cf['action'] = Action.copyto
-            cf['direction'] = RClone.Direction.remote 
+            m['action'] = RClone.Action.copyto
+            m['direction'] = RClone.Direction.remote 
         elif(P == True  and L == True  and R == False):
             # Deleted from the cloud
-            cf['action'] = Action.deletefrom
-            cf['direction'] = RClone.Direction.local
+            m['action'] = RClone.Action.deletefrom
+            m['direction'] = RClone.Direction.local
         elif(P == False and L == False and R == True):
             # New file in cloud
-            cf['action'] = Action.copyto
-            cf['direction'] = RClone.Direction.local
+            m['action'] = RClone.Action.copyto
+            m['direction'] = RClone.Direction.local
         elif(P == True and L == False and R == True):
             # Deleted from the local copy
-            cf['action'] = Action.deletefrom
-            cf['direction'] = RClone.Direction.remote
+            m['action'] = RClone.Action.deletefrom
+            m['direction'] = RClone.Direction.remote
 
-    return cf
+    if(c):
+        return c
+    elif(m):
+        return m
+    else:
+        raise RuntimeError("A file is marked as changed/missing incorrectly")
 
 
 #################################################################################
@@ -276,9 +285,9 @@ def RunSync():
         sys.exit(0)
 
     for name in changed_files:
-        if(changed_files[name]['action'] == Action.copyto):
+        if(changed_files[name]['action'] == RClone.Action.copyto):
             rclone.copyto(name, changed_files[name]['direction'])
-        elif(changed_files[name]['action'] == Action.deletefrom):
+        elif(changed_files[name]['action'] == RClone.Action.deletefrom):
             rclone.delete(name, changed_files[name]['direction'])
 
 
