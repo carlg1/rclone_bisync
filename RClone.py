@@ -6,7 +6,7 @@
 import re
 import json
 import subprocess
-from enum import Enum
+from enum import Enum, IntFlag
 from datetime import datetime, timezone
 
 
@@ -19,16 +19,17 @@ RCLONE = "rclone"
 #################################################################################
 ## Enums
 #################################################################################
-class Direction(Enum):
-    local = 0
-    remote = 1
-    neither = 2
+class Direction(IntFlag):
+    neither = 0
+    local = 1
+    remote = 2
+    both = 3
 
-#class Action(Enum):
-#    none = 0
-#    copy = 1
-#    delete = 2
-#    conflict = 3
+class Action(Enum):
+    none = 0
+    copyto = 1
+    deletefrom = 2
+    conflict = 3
 
 
 #################################################################################
