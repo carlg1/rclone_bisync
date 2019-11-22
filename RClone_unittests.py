@@ -58,6 +58,11 @@ class RClone_parsetime(unittest.TestCase):
         t = parsetime(dt)
         self.assertEqual("2018-07-22 20:55:58.696878", t)
 
+    def test_parsetime_nousecs(self):
+        dt = "2019-09-17T20:24:46-06:00"
+        t = parsetime(dt)
+        self.assertEqual("2019-09-17 20:24:46.000000", t)
+
 if(__name__ == '__main__'):
     unittest.main()
 

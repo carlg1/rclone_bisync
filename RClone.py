@@ -40,6 +40,16 @@ def parsetime(dtstr):
     tzp = "%z"
     x = re.split(r'[ T:.-]', dtstr)
 
+    if(len(x) == 6 and 'Z' in x[5]):
+        x[5] = x[5][:-1]
+        x.append("000000Z")
+
+    if('.' not in dtstr):
+        x.insert(6, "000000")
+
+    if(len(x) < 7):
+        raise ValueError("Date string malfromated")
+
     if('Z' in x[6]):
         x[6] = x[6][:-1]
         tz = "+0000"
@@ -220,7 +230,13 @@ class rclone():
             lsj[n] = {}
 
             lsj[n]['size'] = f['Size']
-            lsj[n]['time'] = parsetime(f['ModTime'])
+            try:
+                lsj[n]['time'] = parsetime(f['ModTime'])
+            except Exception as e:
+                print("ModTime failed to parse most likely:")
+                print("Modtime(dtstr) =", f['ModTime'])
+                print("e =", e)
+                raise(e)
 
             if('Hashes' in f):
                 lsj[n]['md5sum'] = f['Hashes']['MD5']
